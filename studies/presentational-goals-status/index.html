@@ -1,0 +1,1332 @@
+<!DOCTYPE html>
+<html>
+    <head>
+        <title> Experiment </title>
+
+        <link rel="stylesheet" href='css/jspsych.css' />
+        <link rel="stylesheet" href='css/jquery-ui-edit.css' />
+
+        <script src='js/jquery.min.js'></script>
+        <script src='js/jquery-ui.min.js'></script>
+        <script src='js/timeme.min.js'></script>
+
+        <!-- Phaser-->
+        <script src="https://cdn.jsdelivr.net/npm/phaser@3.55.2/dist/phaser.min.js"></script>
+        <script type="module" src="phaser/src/game.js"></script>
+        <script src="vignettes/utils.js"></script>
+
+        <!-- hCaptcha -->
+        <script src="https://js.hcaptcha.com/1/api.js" async defer></script>
+
+        <script src='js/jspsych.js'></script>
+        <script src="https://unpkg.com/@jspsych-contrib/plugin-pipe"></script>
+        <script src='js/plugin-preload.js'></script>
+        <script src='js/plugin-instructions.js'></script>
+        <script src='js/plugin-html-button-response.js'></script>
+        <script src='js/plugin-survey-multi-choice.js'></script>
+        <script src='js/plugin-survey-html-form.js'></script>
+        <script src='js/plugin-hierarchy-ranking.js'></script>
+
+        <!-- jsPsych plugins -->
+        <script src="https://unpkg.com/@jspsych/plugin-html-keyboard-response@1.1.3"></script>
+        <script src="https://unpkg.com/@jspsych-contrib/plugin-pipe"></script>
+
+        <script src='js/instructions.js'></script>
+        <script src="vignettes/scenes.js"></script>
+        <script src="vignettes/stories.js"></script>
+        <script src='js/plugin-captcha-trial.js'></script>
+           <!-- cyborg-hunter (signal collection + triage) and guard
+               (deterrence + honeypot detection). Each guard extension
+               is self-contained — one script per concern. cyborg-hunter
+               splits its core (cyborg-hunter.min.js) from its extension
+               adapter so non-jsPsych studies can use the core directly.
+               Load order: friction before honeypot, so honeypot's
+               subscription to friction events lands cleanly. -->
+           <script src='../../dist/cyborg-hunter.min.js'></script>
+           <script src='../../dist/extension-cyborg-hunter.js'></script>
+           <script src='../../dist/extension-guard-friction.js'></script>
+           <script src='../../dist/extension-guard-honeypot.js'></script>
+
+        <script src='js/consent.js'></script>
+        <script src='js/feedback-demographics.js'></script>
+        <script src='js/utils.js'></script>
+
+        <style>
+            .scene-grid {
+                display: grid;
+                grid-template-columns: auto 1fr 1fr 1fr;
+                grid-template-rows: auto auto;
+                gap: 6px 10px;
+                max-width: 750px;
+                margin: 0 auto 10px auto;
+                align-items: center;
+            }
+            .scene-cell .cell-header {
+                text-align: center;
+                font-weight: bold;
+                font-size: 14px;
+                color: #555;
+                margin-bottom: 4px;
+            }
+            .scene-grid .row-label {
+                font-weight: bold;
+                font-size: 14px;
+                padding-right: 8px;
+                text-align: right;
+            }
+            .scene-grid .pref-cell {
+                grid-row: 1 / 3;
+                grid-column: 2;
+                display: flex;
+                align-items: center;
+                justify-content: center;
+            }
+            .scene-img {
+                width: 100%;
+                max-width: 180px;
+                height: auto;
+                border-radius: 8px;
+                box-shadow: 0 3px 6px rgba(0, 0, 0, 0.18);
+                transition: opacity 0.6s ease-in-out, outline 0.3s;
+            }
+            .scene-img.dimmed {
+                opacity: 0.3;
+            }
+            .scene-img.highlighted {
+                outline: 3px solid #1976d2;
+                outline-offset: 2px;
+            }
+            .scene-cell {
+                text-align: center;
+            }
+            .scene-desc {
+                font-size: 13px;
+                color: #000000;
+                margin-top: 4px;
+                line-height: 1.3;
+                min-height: 2.6em;
+                transition: opacity 0.4s ease-in-out;
+            }
+            .scene-desc.tooltip-mode {
+                opacity: 0;
+                transition: opacity 0.2s ease-in-out;
+            }
+            .scene-cell:hover .scene-desc.tooltip-mode {
+                opacity: 1;
+            }
+        </style>
+
+    </head>
+
+    <body>
+    </body>
+
+    <script>
+        console.log('Loading jsPsych plugins and utils');
+
+        TimeMe.initialize({
+            currentPageName: 'page',
+            idleTimeoutInSeconds: 15
+        });
+
+        // =============================================================
+        // EXPERIMENT CONFIGURATION
+        // =============================================================
+
+        var debugMode = false;
+        // Test mode: append ?test=1 to the URL to skip comprehension and
+        // truncate the trial list to 2, so the experiment can be walked
+        // end-to-end in ~1 minute. Used for verifying guard wiring and
+        // CSV output without sitting through the full study. The
+        // window._inspectGuards() helper (defined after initJsPsych) is
+        // available regardless of test mode for mid-experiment console
+        // inspection.
+        var testMode = new URLSearchParams(window.location.search).get('test') === '1';
+        var skipComprehension = testMode; // Set to false to enable comprehension checks
+        const prolific_return_url = "https://app.prolific.com/submissions/complete?cc=CYBS69HT";
+        if (testMode) {
+            console.log('%c[TEST MODE] Comprehension skipped; trials truncated to 2. ' +
+                'Call window._inspectGuards() in the console at any time to dump state.',
+                'background: #ffcc00; color: #000; padding: 2px 6px; font-weight: bold;');
+        }
+
+        // Participant + session IDs computed BEFORE initJsPsych so the
+        // cyborg-hunter extension can read participantId at initialize()
+        // time. Vanilla equivalents of jsPsych.randomization.randomID and
+        // jsPsych.data.getURLVariable, which only exist after initJsPsych.
+        const unique_id = (Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2)).slice(0, 10);
+        const prolific_id = new URLSearchParams(window.location.search).get('PROLIFIC_PID') || '';
+        const prolific_study_id = new URLSearchParams(window.location.search).get('STUDY_ID') || '';
+        const prolific_session_id = new URLSearchParams(window.location.search).get('SESSION_ID') || '';
+        const experiment_id = "GRbZzp3Wb17w";
+        const fileID = prolific_id || unique_id;
+        const participant_id = prolific_id || unique_id;
+
+        // =============================================================
+        // Initialize jsPsych
+        // =============================================================
+        const jsPsych = initJsPsych({
+            show_progress_bar: true,
+            auto_update_progress_bar: false,
+            extensions: [
+                { type: jsPsychCyborgHunter, params: { participantId: participant_id, preset: 'standard' } },
+                { type: jsPsychGuardFriction },
+                { type: jsPsychGuardHoneypot }
+            ],
+            on_finish: () => {
+                // Order matters: stop friction first so its final 'end' event
+                // for any in-progress violation reaches the honeypot's log
+                // before the honeypot writes the rollup to jsPsych data.
+                jsPsych.extensions['guard-friction'].finalize();
+                jsPsych.extensions['guard-honeypot'].finalize();
+                jsPsych.extensions['cyborg-hunter'].finalize();
+                $('#jspsych-content').css('margin-top', 'auto');
+                if (testMode) {
+                    // Suppress redirect to Prolific so the page sits idle and
+                    // the researcher can call _inspectGuards() or grab the
+                    // CSV via copy(jsPsych.data.get().csv()) without
+                    // racing the navigation.
+                    $('#jspsych-content').html('<div style="margin: auto; max-width: 600px;">' +
+                        '<p><strong>[TEST MODE]</strong> Experiment finished. ' +
+                        'Redirect to Prolific suppressed.</p>' +
+                        '<p>Open devtools and run: ' +
+                        '<code>_inspectGuards()</code> or ' +
+                        '<code>copy(jsPsych.data.get().csv())</code></p></div>');
+                    console.log('%c[TEST MODE] on_finish complete; redirect suppressed.',
+                        'background: #ffcc00; color: #000; padding: 2px 6px; font-weight: bold;');
+                    return;
+                }
+                $('#jspsych-content').html('<div style="margin: auto;"> <p>' +
+                    ' Thank you for participating in this experiment! </p>' +
+                    '<p> Redirecting you back to Prolific... </p>');
+                setTimeout(function(){}, 200);
+                window.location = prolific_return_url;
+            }
+        });
+
+        // ----- Debug inspector ----------------------------------------
+        // Always available (not just in test mode) so a researcher can
+        // open devtools mid-experiment and see what the guards have
+        // accumulated. Reads through the public API of each module —
+        // does not poke at internals.
+        window._inspectGuards = function () {
+            const friction = window.GuardFriction;
+            const honeypot = window.GuardHoneypot;
+            console.group('%c[Guards] inspect @ ' + new Date().toISOString(),
+                'background: #1976d2; color: #fff; padding: 2px 6px; font-weight: bold;');
+
+            if (friction) {
+                console.log('Friction state:', friction.getCurrentState());
+            } else {
+                console.log('Friction: not loaded');
+            }
+
+            if (honeypot) {
+                console.log('Honeypot bait fields:', honeypot.getHoneypotData());
+                console.log('Violations (ended):', honeypot.getViolations());
+                console.log('Per-trial snapshot (includes in-progress):',
+                    honeypot.getTrialDataSnapshot());
+            } else {
+                console.log('Honeypot: not loaded');
+            }
+
+            // Recent trial rows: per-trial guard columns vs session columns.
+            // Useful for verifying the rename fix landed correctly — per-trial
+            // values vary row-to-row; session_* values are uniform across rows.
+            const allRows = jsPsych.data.get().values();
+            const lastFew = allRows.slice(-3);
+            if (lastFew.length) {
+                console.log('Last ' + lastFew.length + ' trial(s) — guard columns:');
+                console.table(lastFew.map(function (r) {
+                    return {
+                        trial: r.trial,
+                        ai_use: r.ai_use,
+                        ai_use_session: r.ai_use_session,
+                        violation_count: r.guard_assistance_violation_count,
+                        violation_count_session: r.guard_assistance_violation_count_session,
+                        in_violation: r.guard_assistance_in_violation,
+                    };
+                }));
+            } else {
+                console.log('No trial rows in jsPsych.data yet.');
+            }
+            console.groupEnd();
+            return 'See expanded console group above.';
+        };
+
+        // Stories to include in the experiment.
+        // Format: <competitive/complementary>-n_fruits(<nA>;<nO>)-R(<watched>;<not_watched>)_G(<watched>;<not_watched>)
+        var selectedStories = [
+            'competitive-n_fruits(1;1)-R(Orange;Apple)_G(Orange;Apple)',
+            'competitive-n_fruits(1;1)-R(Apple;Orange)_G(Apple;Orange)',
+            'competitive-n_fruits(1;1)-R(Orange;Apple)_G(Apple;Apple)',
+            'competitive-n_fruits(1;1)-R(Orange;Apple)_G(Orange;Orange)',
+            'competitive-n_fruits(1;1)-R(Apple;Orange)_G(Apple;Apple)',
+            'competitive-n_fruits(1;1)-R(Apple;Orange)_G(Orange;Orange)',
+            'competitive-n_fruits(1;1)-R(Orange;Apple)_G(Apple;Orange)',
+            'competitive-n_fruits(1;1)-R(Apple;Apple)_G(Apple;Apple)',
+            'competitive-n_fruits(1;1)-R(Orange;Orange)_G(Orange;Orange)',
+            'competitive-n_fruits(1;1)-R(Orange;Orange)_G(Apple;Apple)',
+
+            'complementary-n_fruits(1;1)-R(Orange;Orange)_G(Apple;Apple)',
+            'complementary-n_fruits(1;1)-R(Orange;Apple)_G(Apple;Orange)',
+            'complementary-n_fruits(1;1)-R(Apple;Orange)_G(Orange;Apple)',
+        ];
+
+        // Stories to use for comprehension checks (must be a subset of selectedStories)
+        var comprehensionStoryIds = [
+            'competitive-n_fruits(1;1)-R(Orange;Apple)_G(Apple;Orange)',
+            'complementary-n_fruits(1;1)-R(Orange;Orange)_G(Apple;Apple)',
+        ];
+
+        // =============================================================
+        // Build story objects from IDs
+        // =============================================================
+
+        var allStoryData = [];
+        for (var i = 0; i < selectedStories.length; i++) {
+            var story = storyIdToTimeline(selectedStories[i]);
+            story.isComprehension = comprehensionStoryIds.indexOf(selectedStories[i]) !== -1;
+            allStoryData.push(story);
+        }
+        console.log('All story data:', allStoryData);
+
+    
+        // =============================================================
+        // Randomize story order and comprehension check order
+        // =============================================================
+
+        // Split into comprehension and trial stories
+
+        var comprehensionStories = allStoryData.filter(function(s) { return s.isComprehension; });
+        var trialStories = allStoryData; // all stories are trial stories
+        // Randomize comprehension story order
+        var compOrder = jsPsych.randomization.shuffle(Array.from({length: comprehensionStories.length}, (_, i) => i));
+        // Randomize trial order
+        var trialOrder = jsPsych.randomization.shuffle(Array.from({length: trialStories.length}, (_, i) => i));
+
+        // Logic variables
+        var comprehensionOngoing = !skipComprehension;
+        var looping = false;
+        var comprehensionTrialIdx = 0;
+        var nComprehensionTrials = skipComprehension ? 0 : comprehensionStories.length;
+        var trialIdx = 0;
+        var nTrials = trialStories.length;
+        var totalTrials = nComprehensionTrials + nTrials;
+
+        // Per-participant: which character's row appears at the top of the grid.
+        // Fixed for the whole session so the participant sees a consistent layout.
+        var topCharacter = Math.random() < 0.5 ? 'red' : 'green';
+        console.log('[layout] top_position:', topCharacter);
+
+        // =============================================================
+        // Helper: build the 5-scene grid HTML for a story
+        // =============================================================
+        function buildSceneGridHTML(story, options) {
+            options = options || {};
+            var highlightIdx = options.highlightIdx; // index to highlight (0-4), undefined = all visible
+            var dim = options.dim; // if true, non-highlighted are dimmed
+            var showDescs = options.showDescs; // if true, include description divs below each image
+
+            var vignetteKeys = storyVignetteList(story);
+
+            function descHTML(idx) {
+                if (!showDescs) return '';
+                var key = vignetteKeys[idx];
+                var desc = scenes[key] ? scenes[key].description : '';
+                return '<div class="scene-desc" data-desc-idx="' + idx + '">' + desc + '</div>';
+            }
+
+            // Per-character cell renderer. The data-scene-idx values stay
+            // tied to the character (1/2 = red absent/present, 3/4 = green
+            // absent/present) so reveal logic and saved data are unchanged
+            // by row swapping. Only the top row carries the column headers
+            // (keyed to fire when either row's image is revealed).
+            function rowCells(character, withHeaders) {
+                var absentIdx = character === 'red' ? 1 : 3;
+                var presentIdx = character === 'red' ? 2 : 4;
+                var absentHeader = withHeaders
+                    ? '<div class="cell-header" data-header-for="1,3"><span style="color:purple; font-weight:bold">Purple</span> Absent</div>'
+                    : '';
+                var presentHeader = withHeaders
+                    ? '<div class="cell-header" data-header-for="2,4"><span style="color:purple; font-weight:bold">Purple</span> Present</div>'
+                    : '';
+                var s = '';
+                s += '<div class="row-label" style="color:' + character + ';"></div>';
+                // Absent
+                s += '<div class="scene-cell">';
+                s += absentHeader;
+                s += '<img src="./images/' + vignetteKeys[absentIdx] + '.png" class="scene-img' +
+                    getImgClass(absentIdx, highlightIdx, dim) + '" data-scene-idx="' + absentIdx + '" />';
+                s += descHTML(absentIdx);
+                s += '</div>';
+                // Present
+                s += '<div class="scene-cell">';
+                s += presentHeader;
+                s += '<img src="./images/' + vignetteKeys[presentIdx] + '.png" class="scene-img' +
+                    getImgClass(presentIdx, highlightIdx, dim) + '" data-scene-idx="' + presentIdx + '" />';
+                s += descHTML(presentIdx);
+                s += '</div>';
+                return s;
+            }
+
+            var topChar = (typeof topCharacter !== 'undefined') ? topCharacter : 'red';
+            var bottomChar = topChar === 'red' ? 'green' : 'red';
+
+            var html = '<div class="scene-grid">';
+
+            // Top row (carries the column headers)
+            html += rowCells(topChar, true);
+
+            // Preference cell (spans both rows visually via CSS grid-row: 1 / 3)
+            // Inserted after the top row's cells so the grid picks it up in
+            // column 2; CSS positions it across both rows.
+            html += '<div class="pref-cell"><div class="scene-cell">';
+            html += '<img src="./images/' + vignetteKeys[0] + '.png" class="scene-img' +
+                getImgClass(0, highlightIdx, dim) + '" data-scene-idx="0" />';
+            html += descHTML(0);
+            html += '</div></div>';
+
+            // Bottom row (no headers)
+            html += rowCells(bottomChar, false);
+
+            html += '</div>'; // scene-grid
+            return html;
+        }
+
+        function getImgClass(idx, highlightIdx, dim) {
+            if (highlightIdx === undefined) return ''; // all normal
+            if (idx === highlightIdx) return ' highlighted';
+            return dim ? ' dimmed' : '';
+        }
+
+
+        // =============================================================
+        // Preload images
+        // =============================================================
+        var imagePaths = [
+            './images/characters.png',
+            './phaser/assets/characters/agent_red_happy.png',
+            './phaser/assets/characters/agent_red.png',
+            './phaser/assets/characters/agent_red_sad.png',
+            './phaser/assets/characters/agent_green_happy.png',
+            './phaser/assets/characters/agent_green.png',
+            './phaser/assets/characters/agent_green_sad.png',
+            './phaser/assets/characters/agent_purple_happy.png',
+            './phaser/assets/characters/agent_purple.png',
+            './phaser/assets/characters/agent_purple_sad.png',
+            './phaser/assets/objects/applegreen1.png',
+            './phaser/assets/objects/applegreen2.png',
+            './phaser/assets/objects/orange1.png',
+            './phaser/assets/objects/orange2.png',
+            './phaser/assets/tilesets/blacksmith-smelter.png',
+            './phaser/assets/tilesets/victorian-market.png',
+            './phaser/assets/tilesets/victorian-streets.png',
+            './phaser/assets/tilesets/victorian-garden.png',
+            './phaser/assets/tilesets/terrain-v7.png',
+            './phaser/assets/tilesets/tavern-deco.png',
+            './phaser/assets/tilesets/tavern-furniture.png',
+            './phaser/assets/tilesets/container.png',
+        ];
+
+        // Add all story images
+        for (var i = 0; i < allStoryData.length; i++) {
+            var vigs = storyVignetteList(allStoryData[i]);
+            for (var j = 0; j < vigs.length; j++) {
+                imagePaths.push('./images/' + vigs[j] + '.png');
+            }
+        }
+
+        var preload_trial = {
+            type: jsPsychPreload,
+            images: imagePaths,
+        };
+
+
+        // =============================================================
+        // Comprehension: helper to compute correct answers
+        // =============================================================
+        function getComprehensionAnswers(story) {
+            var simParts = story.sim.split('_');
+            var prefR = simParts[1].split('-')[1]; // 'A' or 'O'
+            var prefG = simParts[2].split('-')[1]; // 'A' or 'O'
+
+            var redAbsentChoice = story.redAbsent.split('_')[2].split('-')[1];
+            var redPresentChoice = story.redPresent.split('_')[2].split('-')[1];
+            var greenAbsentChoice = story.greenAbsent.split('_')[2].split('-')[1];
+            var greenPresentChoice = story.greenPresent.split('_')[2].split('-')[1];
+
+            return {
+                redPref: (prefR === 'A') ? 'Apples' : 'Oranges',
+                greenPref: (prefG === 'A') ? 'Apples' : 'Oranges',
+                redGreenKnowPrefs: story.sim.includes('div') ? 'No' : 'Yes',
+                purpleKnowsPrefs: story.sim.includes('P-present') ? 'Yes' : 'No',
+                redPickedFavAbsent: (redAbsentChoice === prefR) ? 'Yes' : 'No',
+                redPickedFavPresent: (redPresentChoice === prefR) ? 'Yes' : 'No',
+                greenPickedFavAbsent: (greenAbsentChoice === prefG) ? 'Yes' : 'No',
+                greenPickedFavPresent: (greenPresentChoice === prefG) ? 'Yes' : 'No',
+            };
+        }
+
+        var comprehensionVideosSeen = false;
+
+        // =============================================================
+        // Comprehension: merged trial (videos + questions interleaved)
+        // =============================================================
+
+        // Helper: play a vignette video in the canvas container, call onDone when finished
+        function playCompVideo(vignette, onDone) {
+            if (window.game) { window.game.destroy(true); window.game = null; }
+            var phaserParams = vignetteToPhaser(vignette);
+            window.trialPhaserConfig = {
+                framework: 'jspsych',
+                endTrialCondition: 'callback',
+                userId: 0,
+                characterChoices: phaserParams.characterChoices,
+                characterColors: phaserParams.characterColors,
+                sceneStr: phaserParams.sceneStr,
+                onComplete: function() {
+                    if (onDone) onDone();
+                },
+            };
+            window.vignetteStr = vignette;
+            window.game = runPhaser(300, 300, 'comp-canvas');
+        }
+
+        var comp_merged_trial = {
+            type: jsPsychHtmlButtonResponse,
+            stimulus: function() {
+                var story = jsPsych.timelineVariable('story');
+                return '<div id="comp-outer-container">' +
+                    '<div style="display:flex; align-items:flex-start; gap:20px; justify-content:center;">' +
+                        '<div id="comp-grid-container">' + buildSceneGridHTML(story, { showDescs: true }) + '</div>' +
+                        '<div id="comp-video-panel" style="display:flex; flex-direction:column; align-items:center; flex-shrink:0; min-width:320px;">' +
+                            '<div id="comp-canvas" style="width:300px; height:300px; position:relative;"></div>' +
+                            '<div id="comp-video-desc" style="text-align:center; font-size:15px; margin:10px 0; max-width:320px;"></div>' +
+                        '</div>' +
+                    '</div>' +
+                '</div>';
+            },
+            choices: ['Submit'],
+            on_load: function() {
+                var story = jsPsych.timelineVariable('story');
+                var vignetteKeys = storyVignetteList(story);
+                var skipVideos = comprehensionVideosSeen;
+
+                function colorSpan(name) {
+                    var cap = name.charAt(0).toUpperCase() + name.slice(1);
+                    return '<span style="color:' + name + '; font-weight:bold">' + cap + '</span>';
+                }
+
+                // Hide submit button initially
+                var submitBtn = document.getElementById('jspsych-html-button-response-button-0');
+                submitBtn.parentElement.style.display = 'none';
+
+                // Hide video panel if skipping videos
+                if (skipVideos) {
+                    document.getElementById('comp-video-panel').style.display = 'none';
+                }
+
+                // All images, descriptions, and column headers start hidden
+                var allImgs = document.querySelectorAll('.scene-img');
+                var allDescs = document.querySelectorAll('.scene-desc');
+                var allHeaders = document.querySelectorAll('.cell-header');
+                allImgs.forEach(function(img) { img.style.opacity = '0'; });
+                allDescs.forEach(function(desc) { desc.style.opacity = '0'; });
+                allHeaders.forEach(function(h) { h.style.opacity = '0'; });
+
+                function revealHeaderFor(idx) {
+                    var headers = document.querySelectorAll('.cell-header');
+                    headers.forEach(function(h) {
+                        var forAttr = (h.getAttribute('data-header-for') || '').split(',');
+                        if (forAttr.indexOf(String(idx)) !== -1) {
+                            h.style.transition = 'opacity 0.6s ease-in-out';
+                            h.style.opacity = '1';
+                        }
+                    });
+                }
+
+                function revealScene(idx, includeDesc) {
+                    var img = document.querySelector('.scene-img[data-scene-idx="' + idx + '"]');
+                    if (img) { img.style.transition = 'opacity 0.6s ease-in-out'; img.style.opacity = '1'; }
+                    revealHeaderFor(idx);
+                    if (includeDesc) {
+                        var desc = document.querySelector('.scene-desc[data-desc-idx="' + idx + '"]');
+                        if (desc) { desc.style.transition = 'opacity 0.6s ease-in-out'; desc.style.opacity = '1'; }
+                    }
+                }
+
+                function revealScenes(indices, includeDesc) {
+                    indices.forEach(function(idx) { revealScene(idx, includeDesc); });
+                }
+
+                function dimScenes(indices) {
+                    indices.forEach(function(idx) {
+                        var img = document.querySelector('.scene-img[data-scene-idx="' + idx + '"]');
+                        if (img) { img.style.transition = 'opacity 0.4s ease-in-out'; img.style.opacity = '0.7'; }
+                    });
+                }
+
+                function showVideoDesc(vignette) {
+                    var descEl = document.getElementById('comp-video-desc');
+                    if (scenes[vignette]) {
+                        descEl.innerHTML = '<p>' + scenes[vignette].description + '</p>';
+                    }
+                    descEl.style.opacity = '0';
+                    setTimeout(function() {
+                        descEl.style.transition = 'opacity 0.8s ease-in-out';
+                        descEl.style.opacity = '1';
+                    }, 400);
+                }
+
+                // Build question sections
+                function buildCompQuestionHTML(idPrefix, questions) {
+                    var h = '<div id="' + idPrefix + '-questions" style="display:none; text-align:center; margin:15px auto; max-width:650px; padding:12px; background:rgba(255,255,255,0.05); border-radius:8px;">';
+                    h += '<h4 style="margin-top:0; margin-bottom:10px;">Please answer the following:</h4>';
+                    for (var i = 0; i < questions.length; i++) {
+                        var q = questions[i];
+                        h += '<div style="display:flex; align-items:center; gap:8px; justify-content:center; margin:8px 0; flex-wrap:wrap; font-size:15px;">';
+                        h += '<span>' + q.prompt + '</span>';
+                        h += '<select id="' + idPrefix + '-q' + i + '" style="padding:4px 8px; font-size:15px; border-radius:4px;">';
+                        h += '<option value="">--</option>';
+                        for (var j = 0; j < q.options.length; j++) {
+                            h += '<option value="' + q.options[j] + '">' + q.options[j] + '</option>';
+                        }
+                        h += '</select>';
+                        h += '</div>';
+                    }
+                    h += '<button id="' + idPrefix + '-continue" class="jspsych-btn" disabled style="margin-top:10px;">Continue</button>';
+                    h += '</div>';
+                    return h;
+                }
+
+                var outerContainer = document.getElementById('comp-outer-container');
+
+                // Stage 1: Preference questions
+                var stage1HTML = buildCompQuestionHTML('comp-stage1', [
+                    { prompt: 'Which fruit does ' + colorSpan('red') + ' prefer?', options: ['Apples', 'Oranges'] },
+                    { prompt: 'Which fruit does ' + colorSpan('green') + ' prefer?', options: ['Apples', 'Oranges'] },
+                    { prompt: 'Do ' + colorSpan('red') + ' and ' + colorSpan('green') + ' know each other\'s preferred fruit?', options: ['Yes', 'No'] },
+                    { prompt: 'Does ' + colorSpan('purple') + ' know which fruit ' + colorSpan('red') + ' and ' + colorSpan('green') + ' prefer?', options: ['Yes', 'No'] },
+                ]);
+
+                // Stage 2: Red questions
+                var stage2HTML = buildCompQuestionHTML('comp-stage2', [
+                    { prompt: 'Did ' + colorSpan('red') + ' pick their preferred fruit when ' + colorSpan('purple') + ' was absent?', options: ['Yes', 'No'] },
+                    { prompt: 'Did ' + colorSpan('red') + ' pick their preferred fruit when ' + colorSpan('purple') + ' was present?', options: ['Yes', 'No'] },
+                ]);
+
+                // Stage 3: Green questions
+                var stage3HTML = buildCompQuestionHTML('comp-stage3', [
+                    { prompt: 'Did ' + colorSpan('green') + ' pick their preferred fruit when ' + colorSpan('purple') + ' was absent?', options: ['Yes', 'No'] },
+                    { prompt: 'Did ' + colorSpan('green') + ' pick their preferred fruit when ' + colorSpan('purple') + ' was present?', options: ['Yes', 'No'] },
+                ]);
+
+                // Insert questions below the images+video row
+                outerContainer.insertAdjacentHTML('beforeend', stage1HTML);
+                outerContainer.insertAdjacentHTML('beforeend', stage2HTML);
+                outerContainer.insertAdjacentHTML('beforeend', stage3HTML);
+
+                // Enable continue when all questions in a stage are answered
+                function enableContinueWhenReady(prefix, nQuestions) {
+                    var selects = [];
+                    for (var i = 0; i < nQuestions; i++) {
+                        selects.push(document.getElementById(prefix + '-q' + i));
+                    }
+                    var contBtn = document.getElementById(prefix + '-continue');
+                    function check() {
+                        contBtn.disabled = !selects.every(function(s) { return s.value !== ''; });
+                    }
+                    selects.forEach(function(s) { s.addEventListener('change', check); });
+                }
+
+                enableContinueWhenReady('comp-stage1', 4);
+                enableContinueWhenReady('comp-stage2', 2);
+                enableContinueWhenReady('comp-stage3', 2);
+
+                // Store responses
+                window._compResponses = {};
+
+                function showQuestions(stageId) {
+                    var el = document.getElementById(stageId + '-questions');
+                    el.style.display = 'block';
+                    el.style.opacity = '0';
+                    el.style.transition = 'opacity 0.5s ease-in-out';
+                    setTimeout(function() { el.style.opacity = '1'; }, 50);
+                }
+
+                // --- Video queue: plays scenes in order, with Continue button between videos ---
+                function playVideoSequence(sceneIndices, onAllDone) {
+                    if (skipVideos) {
+                        // On retry: reveal images+descs immediately, skip videos
+                        revealScenes(sceneIndices, true);
+                        onAllDone();
+                        return;
+                    }
+                    var i = 0;
+                    function playNext() {
+                        if (i >= sceneIndices.length) {
+                            // Remove inter-video continue button if present
+                            var btn = document.getElementById('comp-video-continue');
+                            if (btn) btn.remove();
+                            onAllDone();
+                            return;
+                        }
+                        var idx = sceneIndices[i];
+                        var vignette = vignetteKeys[idx];
+                        revealScene(idx, false);
+                        showVideoDesc(vignette);
+                        playCompVideo(vignette, function() {
+                            i++;
+                            if (i < sceneIndices.length) {
+                                // Show a Continue button before the next video
+                                var panel = document.getElementById('comp-video-panel');
+                                var btn = document.getElementById('comp-video-continue');
+                                if (!btn) {
+                                    btn = document.createElement('button');
+                                    btn.id = 'comp-video-continue';
+                                    btn.className = 'jspsych-btn';
+                                    btn.textContent = 'Continue';
+                                    btn.style.marginTop = '10px';
+                                    panel.appendChild(btn);
+                                }
+                                btn.style.display = 'inline-block';
+                                btn.onclick = function() {
+                                    btn.style.display = 'none';
+                                    playNext();
+                                };
+                            } else {
+                                playNext();
+                            }
+                        });
+                    }
+                    playNext();
+                }
+
+                // Stage 1 continue → play Red videos → show Red questions
+                document.getElementById('comp-stage1-continue').addEventListener('click', function() {
+                    window._compResponses.redPref = document.getElementById('comp-stage1-q0').value;
+                    window._compResponses.greenPref = document.getElementById('comp-stage1-q1').value;
+                    window._compResponses.knowPrefs = document.getElementById('comp-stage1-q2').value;
+                    window._compResponses.purpleKnows = document.getElementById('comp-stage1-q3').value;
+                    document.getElementById('comp-stage1-questions').style.display = 'none';
+                    dimScenes([0]);
+                    playVideoSequence([1, 2], function() {
+                        showQuestions('comp-stage2');
+                    });
+                });
+
+                // Stage 2 continue → play Green videos → show Green questions
+                document.getElementById('comp-stage2-continue').addEventListener('click', function() {
+                    window._compResponses.redAbsent = document.getElementById('comp-stage2-q0').value;
+                    window._compResponses.redPresent = document.getElementById('comp-stage2-q1').value;
+                    document.getElementById('comp-stage2-questions').style.display = 'none';
+                    dimScenes([1, 2]);
+                    playVideoSequence([3, 4], function() {
+                        showQuestions('comp-stage3');
+                    });
+                });
+
+                // Stage 3 continue → submit the trial directly
+                document.getElementById('comp-stage3-continue').addEventListener('click', function() {
+                    window._compResponses.greenAbsent = document.getElementById('comp-stage3-q0').value;
+                    window._compResponses.greenPresent = document.getElementById('comp-stage3-q1').value;
+                    // Clean up video
+                    if (window.game) { window.game.destroy(true); window.game = null; }
+                    // Click the hidden submit button to finish the trial
+                    submitBtn.click();
+                });
+
+                // --- Start: play preference video → show Stage 1 questions ---
+                playVideoSequence([0], function() {
+                    showQuestions('comp-stage1');
+                });
+            },
+            on_finish: function(data) {
+                if (window.game) { window.game.destroy(true); window.game = null; }
+                var story = jsPsych.timelineVariable('story');
+                var answers = getComprehensionAnswers(story);
+                var resp = window._compResponses || {};
+
+                data.correct = (resp.redPref === answers.redPref) &&
+                               (resp.greenPref === answers.greenPref) &&
+                               (resp.knowPrefs === answers.redGreenKnowPrefs) &&
+                               (resp.purpleKnows === answers.purpleKnowsPrefs) &&
+                               (resp.redAbsent === answers.redPickedFavAbsent) &&
+                               (resp.redPresent === answers.redPickedFavPresent) &&
+                               (resp.greenAbsent === answers.greenPickedFavAbsent) &&
+                               (resp.greenPresent === answers.greenPickedFavPresent);
+
+                if (debugMode) data.correct = true;
+
+                if (data.correct) {
+                    looping = false;
+                    comprehensionTrialIdx++;
+                    if (comprehensionTrialIdx >= nComprehensionTrials) {
+                        comprehensionOngoing = false;
+                    }
+                    jsPsych.setProgressBar(comprehensionTrialIdx / totalTrials);
+                } else {
+                    looping = true;
+                    comprehensionVideosSeen = true;
+                }
+            },
+            data: {
+                trial: 'comprehension',
+                story: jsPsych.timelineVariable('story'),
+            },
+        };
+
+        var fail_comprehension = {
+            timeline: [{
+                type: jsPsychHtmlButtonResponse,
+                stimulus: 'Unfortunately, you missed some of the comprehension questions.</p><p>Please review the story again.',
+                choices: ['Review'],
+            }],
+            conditional_function: function() {
+                var data = jsPsych.data.get().last(1).values()[0];
+                return !(data.correct);
+            }
+        };
+
+
+        // =============================================================
+        // Comprehension instructions + loops
+        // =============================================================
+        var comprehension_instructions_trial = {
+            type: jsPsychInstructions,
+            pages: comprehension_instruction_pages,
+            show_clickable_nav: true,
+        };
+
+        var comprehension_loops = [];
+        for (var ci = 0; ci < comprehensionStories.length; ci++) {
+            let compIdx = compOrder[ci];
+            comprehension_loops.push({
+                timeline: [comp_merged_trial, fail_comprehension],
+                randomize_order: false,
+                timeline_variables: [{ story: comprehensionStories[compIdx] }],
+                loop_function: function(data) {
+                    var last = jsPsych.data.get().last(1).values()[0];
+                    return !(last.correct);
+                },
+            });
+        }
+
+        // =============================================================
+        // Main trial: combined presentation + hierarchy ranking
+        // =============================================================
+
+        var trial_ranking = {
+            type: jsPsychHierarchyRanking,
+            preamble: function() {
+                return '<p>Based on this story, arrange the characters to show their <strong>social rank</strong>.<br>' +
+                       'Higher position = higher rank. Drag each card into the area.</p>';
+            },
+            stimulus: function() {
+                var story = jsPsych.timelineVariable('story');
+                return '<h4 style="margin:0; text-align:center;">Story ' + (trialIdx + 1) + ' of ' + nTrials + '</h4>' +
+                '<div style="display:flex; align-items:flex-start; gap:20px; justify-content:center;">' +
+                    '<div>' + buildSceneGridHTML(story, { showDescs: true }) + '</div>' +
+                    '<div id="trial-video-panel" style="display:none; flex-direction:column; align-items:center; flex-shrink:0; min-width:320px;">' +
+                        '<div id="trial-canvas" style="width:300px; height:300px; position:relative;"></div>' +
+                        '<div id="trial-video-desc" style="text-align:center; font-size:14px; margin:10px 0; max-width:320px;"></div>' +
+                    '</div>' +
+                '</div>';
+            },
+            on_load: function() {
+                var story = jsPsych.timelineVariable('story');
+                var firstChar = jsPsych.timelineVariable('firstCharacter');
+                var secondChar = firstChar === 'red' ? 'green' : 'red';
+                var delay = debugMode ? 300 : 4000;
+                var vignetteKeys = storyVignetteList(story);
+
+                function capitalize(s) { return s.charAt(0).toUpperCase() + s.slice(1); }
+                function colorSpan(name) {
+                    return '<span style="color:' + name + '; font-weight:bold">' + capitalize(name) + '</span>';
+                }
+
+                // --- Make images clickable to play videos ---
+                var videoPanel = document.getElementById('trial-video-panel');
+                var allSceneImgs = document.querySelectorAll('.scene-img');
+                allSceneImgs.forEach(function(img) {
+                    img.style.cursor = 'pointer';
+                    img.addEventListener('click', function() {
+                        var idx = parseInt(img.getAttribute('data-scene-idx'));
+                        var vignette = vignetteKeys[idx];
+                        // Show video panel
+                        videoPanel.style.display = 'flex';
+                        // Destroy previous game if any
+                        if (window.game) { window.game.destroy(true); window.game = null; }
+                        // Set up Phaser config
+                        var phaserParams = vignetteToPhaser(vignette);
+                        window.trialPhaserConfig = {
+                            framework: 'jspsych',
+                            endTrialCondition: 'callback',
+                            userId: 0,
+                            characterChoices: phaserParams.characterChoices,
+                            characterColors: phaserParams.characterColors,
+                            sceneStr: phaserParams.sceneStr,
+                            onComplete: function() {},
+                        };
+                        window.vignetteStr = vignette;
+                        // noKeyboard: rewatch is autonomous, and disabling
+                        // Phaser's keyboard plugin prevents it from
+                        // intercepting keystrokes meant for the explanation
+                        // textarea below.
+                        window.game = runPhaser(300, 300, 'trial-canvas', { noKeyboard: true });
+                        // Show description
+                        var descEl = document.getElementById('trial-video-desc');
+                        if (scenes[vignette]) {
+                            descEl.innerHTML = '<p>' + scenes[vignette].description + '</p>';
+                        }
+                        // Highlight clicked image
+                        allSceneImgs.forEach(function(i) { i.classList.remove('highlighted'); });
+                        img.classList.add('highlighted');
+                    });
+                });
+
+                // Hide ranking elements initially
+                var preambleEl = document.getElementById('hierarchy-preamble');
+                var rankingWrapper = document.getElementById('ranking-wrapper');
+                var explanationContainer = document.getElementById('hierarchy-explanation-container');
+                var submitParent = document.getElementById('hierarchy-submit').parentElement;
+                preambleEl.style.display = 'none';
+                rankingWrapper.style.display = 'none';
+                explanationContainer.style.display = 'none';
+                submitParent.style.display = 'none';
+
+                // All images, descriptions, and column headers start hidden
+                var allImgs = document.querySelectorAll('.scene-img');
+                var allDescs = document.querySelectorAll('.scene-desc');
+                var allHeaders = document.querySelectorAll('.cell-header');
+                allImgs.forEach(function(img) { img.style.opacity = '0'; });
+                allDescs.forEach(function(desc) { desc.style.opacity = '0'; });
+                allHeaders.forEach(function(h) { h.style.opacity = '0'; });
+
+                // Determine reveal order
+                // indices: 0=pref, 1=red_absent, 2=red_present, 3=green_absent, 4=green_present
+                var stage2Indices, stage3Indices;
+                if (firstChar === 'red') {
+                    stage2Indices = [1, 2];
+                    stage3Indices = [3, 4];
+                } else {
+                    stage2Indices = [3, 4];
+                    stage3Indices = [1, 2];
+                }
+
+                function revealHeaderFor(idx) {
+                    var headers = document.querySelectorAll('.cell-header');
+                    headers.forEach(function(h) {
+                        var forAttr = (h.getAttribute('data-header-for') || '').split(',');
+                        if (forAttr.indexOf(String(idx)) !== -1) {
+                            h.style.transition = 'opacity 0.6s ease-in-out';
+                            h.style.opacity = '1';
+                        }
+                    });
+                }
+
+                function revealScenes(indices) {
+                    indices.forEach(function(idx) {
+                        var img = document.querySelector('.scene-img[data-scene-idx="' + idx + '"]');
+                        var desc = document.querySelector('.scene-desc[data-desc-idx="' + idx + '"]');
+                        if (img) { img.style.transition = 'opacity 0.6s ease-in-out'; img.style.opacity = '1'; }
+                        if (desc) { desc.style.transition = 'opacity 0.6s ease-in-out'; desc.style.opacity = '1'; }
+                        revealHeaderFor(idx);
+                    });
+                }
+
+                // --- Build dropdown question sections ---
+                var stimulusDiv = document.getElementById('hierarchy-stimulus');
+
+                function buildQuestionHTML(idPrefix, charName, otherName) {
+                    var h = '<div id="' + idPrefix + '-questions" style="display:none; text-align:center; margin:15px auto; max-width:550px; padding:12px; background:rgba(255,255,255,0.05); border-radius:8px;">';
+                    h += '<h4 style="margin-top:0; margin-bottom:10px;">Please fill in the following fields:</h3>';
+                    // Question 1: X [likes/...] Y
+                    h += '<div style="display:flex; align-items:center; gap:8px; justify-content:center; margin:8px 0; flex-wrap:wrap; font-size:15px;">';
+                    h += colorSpan(charName);
+                    h += '<select id="' + idPrefix + '-likes" style="padding:4px 8px; font-size:15px; border-radius:4px;">';
+                    h += '<option value="">--</option><option value="likes">likes</option><option value="dislikes">dislikes</option><option value="does not care about">does not care about</option>';
+                    h += '</select>';
+                    h += colorSpan(otherName);
+                    h += '</div>';
+                    // Question 2: X [cares/...] about what Purple thinks of X
+                    h += '<div style="display:flex; align-items:center; gap:8px; justify-content:center; margin:8px 0; flex-wrap:wrap; font-size:15px;">';
+                    h += colorSpan(charName);
+                    h += '<select id="' + idPrefix + '-cares" style="padding:4px 8px; font-size:15px; border-radius:4px;">';
+                    h += '<option value="">--</option><option value="cares">cares</option><option value="does not care">does not care</option>';
+                    h += '</select>';
+                    h += '<span>about what ' + colorSpan('purple') + ' thinks of ' + colorSpan(charName) + '</span>';
+                    h += '</div>';
+                    // Continue button
+                    h += '<button id="' + idPrefix + '-continue" class="jspsych-btn" disabled style="margin-top:10px;">Continue</button>';
+                    h += '</div>';
+                    return h;
+                }
+
+                // Insert question sections after the stimulus
+                stimulusDiv.insertAdjacentHTML('afterend',
+                    buildQuestionHTML('stage3', secondChar, firstChar) // inserted first = appears second in DOM
+                );
+                stimulusDiv.insertAdjacentHTML('afterend',
+                    buildQuestionHTML('stage2', firstChar, secondChar) // inserted second = appears first in DOM
+                );
+
+                // Wire up dropdown listeners to enable continue buttons
+                function enableContinueWhenReady(likesId, caresId, continueId) {
+                    var likesEl = document.getElementById(likesId);
+                    var caresEl = document.getElementById(caresId);
+                    var contBtn = document.getElementById(continueId);
+                    function check() {
+                        contBtn.disabled = !(likesEl.value && caresEl.value);
+                    }
+                    likesEl.addEventListener('change', check);
+                    caresEl.addEventListener('change', check);
+                }
+
+                enableContinueWhenReady('stage2-likes', 'stage2-cares', 'stage2-continue');
+                enableContinueWhenReady('stage3-likes', 'stage3-cares', 'stage3-continue');
+
+                // --- Stage transitions ---
+
+                // Stage 2 Continue → Stage 3
+                document.getElementById('stage2-continue').addEventListener('click', function() {
+                    document.getElementById('stage2-questions').style.display = 'none';
+                    revealScenes(stage3Indices);
+
+                    setTimeout(function() {
+                        var q2 = document.getElementById('stage3-questions');
+                        q2.style.display = 'block';
+                        q2.style.opacity = '0';
+                        q2.style.transition = 'opacity 0.5s ease-in-out';
+                        setTimeout(function() { q2.style.opacity = '1'; }, 50);
+                    }, delay);
+                });
+
+                // Stage 3 Continue → Stage 4 (ranking + explanation)
+                document.getElementById('stage3-continue').addEventListener('click', function() {
+                    document.getElementById('stage3-questions').style.display = 'none';
+
+                    // Store dropdown answers before DOM gets cleared by plugin
+                    window._trialDropdownData = {
+                        first_likes: document.getElementById('stage2-likes').value,
+                        first_cares: document.getElementById('stage2-cares').value,
+                        second_likes: document.getElementById('stage3-likes').value,
+                        second_cares: document.getElementById('stage3-cares').value,
+                    };
+
+                    // Descriptions stay visible (no fade / no tooltip mode)
+
+                    // Show ranking elements with fade-in
+                    preambleEl.style.display = 'block';
+                    rankingWrapper.style.display = 'flex';
+                    explanationContainer.style.display = 'block';
+                    submitParent.style.display = 'block';
+
+                    preambleEl.style.opacity = '0';
+                    rankingWrapper.style.opacity = '0';
+                    explanationContainer.style.opacity = '0';
+                    submitParent.style.opacity = '0';
+
+                    setTimeout(function() {
+                        preambleEl.style.transition = 'opacity 0.5s ease-in-out';
+                        rankingWrapper.style.transition = 'opacity 0.5s ease-in-out';
+                        explanationContainer.style.transition = 'opacity 0.5s ease-in-out';
+                        submitParent.style.transition = 'opacity 0.5s ease-in-out';
+                        preambleEl.style.opacity = '1';
+                        rankingWrapper.style.opacity = '1';
+                        explanationContainer.style.opacity = '1';
+                        submitParent.style.opacity = '1';
+                    }, 50);
+                });
+
+                // --- Trigger stages ---
+
+                // Stage 1: Preferences
+                setTimeout(function() { revealScenes([0]); }, 300);
+
+                // Stage 2: First character's scenes + questions
+                setTimeout(function() {
+                    revealScenes(stage2Indices);
+
+                    setTimeout(function() {
+                        var q1 = document.getElementById('stage2-questions');
+                        q1.style.display = 'block';
+                        q1.style.opacity = '0';
+                        q1.style.transition = 'opacity 0.5s ease-in-out';
+                        setTimeout(function() { q1.style.opacity = '1'; }, 50);
+                    }, delay);
+                }, 300 + delay);
+            },
+            on_finish: function(data) {
+                // Clean up any running Phaser game from video panel
+                if (window.game) { window.game.destroy(true); window.game = null; }
+
+                var story = jsPsych.timelineVariable('story');
+                var vignetteKeys = storyVignetteList(story);
+                var firstChar = jsPsych.timelineVariable('firstCharacter');
+
+                data.trial = 'trial';
+                data.trial_idx = trialIdx;
+                data.story_id = story.id;
+                data.first = firstChar;
+                data.top_position = topCharacter;
+                data.vignette_sim = vignetteKeys[0];
+                data.vignette_red_absent = vignetteKeys[1];
+                data.vignette_red_present = vignetteKeys[2];
+                data.vignette_green_absent = vignetteKeys[3];
+                data.vignette_green_present = vignetteKeys[4];
+
+                // Map dropdown answers to character-specific fields
+                var dd = window._trialDropdownData || {};
+                if (firstChar === 'red') {
+                    data.red_likes = dd.first_likes || '';
+                    data.red_cares = dd.first_cares || '';
+                    data.green_likes = dd.second_likes || '';
+                    data.green_cares = dd.second_cares || '';
+                } else {
+                    data.green_likes = dd.first_likes || '';
+                    data.green_cares = dd.first_cares || '';
+                    data.red_likes = dd.second_likes || '';
+                    data.red_cares = dd.second_cares || '';
+                }
+
+                trialIdx++;
+                jsPsych.setProgressBar((trialIdx + nComprehensionTrials) / totalTrials);
+            },
+            data: {
+                trial: 'trial',
+                story: jsPsych.timelineVariable('story'),
+            },
+        };
+
+
+        // =============================================================
+        // Build main trial timeline
+        // =============================================================
+
+        var trial_instructions_trial = {
+            type: jsPsychInstructions,
+            pages: skipComprehension ? [trial_page_1_no_comp] : instruction_pages,
+            show_clickable_nav: true,
+        };
+
+        var trials = [];
+
+        // Build randomized trial list with firstCharacter randomization
+        var shuffledTrialStories = [];
+        for (var i = 0; i < trialOrder.length; i++) {
+            shuffledTrialStories.push({
+                story: trialStories[trialOrder[i]],
+                firstCharacter: Math.random() < 0.5 ? 'red' : 'green',
+            });
+        }
+
+        // Test-mode truncation. Keeps the first 2 entries so randomization
+        // logic still runs and the trial nesting is preserved — just shorter.
+        if (testMode) {
+            shuffledTrialStories = shuffledTrialStories.slice(0, 2);
+            console.log('[TEST MODE] shuffledTrialStories truncated to',
+                shuffledTrialStories.length, 'trials.');
+        }
+
+        trials.push({
+            timeline: [trial_ranking],
+            timeline_variables: shuffledTrialStories,
+            randomize_order: false, // already shuffled
+        });
+
+
+        // =============================================================
+        // Data saving
+        // =============================================================
+        // unique_id, prolific_id, prolific_study_id, prolific_session_id,
+        // experiment_id, fileID, participant_id all declared before
+        // initJsPsych so the cyborg-hunter extension reads participantId
+        // at initialize() time.
+
+        var save_trial_data = {
+            type: jsPsychPipe,
+            action: 'save',
+            experiment_id: experiment_id,
+            filename: fileID + '_trials.csv',
+            on_finish: function(data) {
+                console.log('[save_trial_data] success:', data.success, 'result:', data.result);
+                if (!data.success) {
+                    console.error('[save_trial_data] DataPipe rejected the trials file. Filename:',
+                        fileID + '_trials.csv', 'Response:', data.result);
+                }
+            },
+            data_string: function() {
+                // Drain guards BEFORE building the CSV so in-progress
+                // violations get a proper 'end' event in the log.
+                // finalize() is idempotent: friction.stop() requires a
+                // valid token and silently rejects subsequent calls, and
+                // honeypot.attachToJsPsychData() can be called repeatedly
+                // (each call overwrites the session columns with the same
+                // values). The experiment-level on_finish will re-call
+                // both, which is a no-op here.
+                jsPsych.extensions['guard-friction'].finalize();
+                jsPsych.extensions['guard-honeypot'].finalize();
+                var matched = jsPsych.data.get().filter({ trial: 'trial' }).values();
+                console.log('[save_trial_data] matched trial records:', matched.length);
+                var data = matched;
+                var rows = data.map(function(t) {
+                    return [
+                        unique_id,
+                        prolific_id,
+                        t.trial_type,
+                        t.trial_idx,
+                        t.story_id,
+                        t.first,
+                        t.top_position,
+                        t.vignette_sim,
+                        t.vignette_red_absent,
+                        t.vignette_red_present,
+                        t.vignette_green_absent,
+                        t.vignette_green_present,
+                        t.rt,
+                        t.time_elapsed,
+                        t.red_likes,
+                        t.red_cares,
+                        t.green_likes,
+                        t.green_cares,
+                        t.red_x,
+                        t.red_y,
+                        t.green_x,
+                        t.green_y,
+                        t.purple_x,
+                        t.purple_y,
+                        t.guard_assistance_active ? 1 : 0,
+                        t.guard_assistance_in_violation ? 1 : 0,
+                        t.guard_assistance_violation_count || 0,
+                        '"' + (t.guard_assistance_current_reason || '').replace(/"/g, '""') + '"',
+                        '"' + (t.explanation || '').replace(/"/g, '""') + '"',
+                    ].join(',');
+                });
+                var header = [
+                    'id', 'prolific_id', 'trial_type', 'trial_idx', 'story_id', 'first', 'top_position',
+                    'vignette_sim', 'vignette_red_absent', 'vignette_red_present',
+                    'vignette_green_absent', 'vignette_green_present',
+                    'rt', 'time_elapsed',
+                    'red_likes', 'red_cares', 'green_likes', 'green_cares',
+                    'red_x', 'red_y', 'green_x', 'green_y', 'purple_x', 'purple_y',
+                    'guard_assistance_active', 'guard_assistance_in_violation',
+                    'guard_assistance_violation_count', 'guard_assistance_current_reason',
+                    'explanation',
+                ].join(',');
+                var csv = [header].concat(rows).join('\n');
+                console.log('[save_trial_data] CSV length:', csv.length, 'bytes');
+                console.log('[save_trial_data] CSV body:\n' + csv);
+                return csv;
+            }
+        };
+
+        var save_participant_data = {
+            type: jsPsychPipe,
+            action: 'save',
+            experiment_id: experiment_id,
+            filename: fileID + '_participant.csv',
+            on_finish: function(data) {
+                console.log('[save_participant_data] success:', data.success, 'result:', data.result);
+                if (!data.success) {
+                    console.error('[save_participant_data] DataPipe rejected the participant file. Filename:',
+                        fileID + '_participant.csv', 'Response:', data.result);
+                }
+            },
+            data_string: function() {
+                // Idempotent guard drain — friction was already stopped
+                // by save_trial_data; this call is for the case where
+                // save_participant_data runs without save_trial_data
+                // preceding it. honeypot.attachToJsPsychData() re-runs
+                // safely and updates the session columns with the latest
+                // values (will include any bait events fired after the
+                // previous save).
+                jsPsych.extensions['guard-friction'].finalize();
+                jsPsych.extensions['guard-honeypot'].finalize();
+                var time = TimeMe.getTimeOnPageInSeconds('page');
+                var data = jsPsych.data.get().filter({ trial_type: 'survey-html-form', trial: 'demographics' }).values()[0];
+                var resp = data ? data.response : {};
+
+                var hp = GuardHoneypot.getHoneypotData();
+
+                var participant = [
+                    unique_id,
+                    prolific_id,
+                    prolific_study_id || '',
+                    prolific_session_id || '',
+                    'demographics',
+                    '"' + (resp.feedback || '') + '"',
+                    resp.age || '',
+                    resp.gender || '',
+                    resp.race || '',
+                    '"' + (resp.ethnicity || '') + '"',
+                    time,
+                    hp.ai_use,
+                    '"' + (hp.ai_report || '').replace(/"/g, '""') + '"',
+                ].join(',');
+                var header = 'id,prolific_id,study_id,session_id,trial_type,feedback,age,gender,race,ethnicity,time,ai_use,ai_report';
+                return header + '\n' + participant;
+            }
+        };
+
+
+        // Final screen
+        var final_screen = {
+            type: jsPsychHtmlKeyboardResponse,
+            stimulus: '<div style="max-width:600px; margin:auto; text-align:center;">' +
+                '<h2>Thank you!</h2>' +
+                '<p>You have completed the study. Your responses have been recorded.</p>' +
+                '<p><a href="' + prolific_return_url + '">Click here to go back to Prolific</a></p>' +
+                '</div>',
+            choices: 'NO_KEYS',
+            response_ends_trial: false,
+            trial_duration: 250
+        };
+
+
+        // =============================================================
+        // Compile timeline
+        // =============================================================
+        var timeline = [];
+        timeline.push(preload_trial);
+        timeline.push(consent);
+        if (!debugMode) {
+            timeline.push(jsPsychGuardFriction.entryTrial());
+        }
+        if (!skipComprehension) {
+            timeline.push(comprehension_instructions_trial);
+            for (var cl = 0; cl < comprehension_loops.length; cl++) {
+                timeline.push(comprehension_loops[cl]);
+            }
+        }
+
+        timeline.push(trial_instructions_trial);
+        for (var ti = 0; ti < trials.length; ti++) {
+            timeline.push(trials[ti]);
+        }
+        timeline.push(feedback_demographics);
+        timeline.push(save_trial_data);
+        timeline.push(save_participant_data);
+        timeline.push(final_screen);
+
+        // Opt every trial in to all three extensions. cyborg-hunter
+        // collects per-trial integrity signals; the guard extensions wire
+        // their lifecycle hooks (per-trial honeypot snapshot from the
+        // honeypot extension; no-ops from friction).
+        timeline.forEach(function (t) {
+            t.extensions = (t.extensions || []).concat([
+                { type: jsPsychCyborgHunter },
+                { type: jsPsychGuardFriction },
+                { type: jsPsychGuardHoneypot }
+            ]);
+        });
+
+        // =============================================================
+        // Run
+        // =============================================================
+        jsPsych.run(timeline);
+
+    </script>
+
+</html>

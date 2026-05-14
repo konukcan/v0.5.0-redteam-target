@@ -1,0 +1,51 @@
+{
+    "width": 10,
+    "height": 10,
+    "tilesets": [
+        {
+            "name": "bread-pastry",
+            "path": "assets/tilesets/bread-pastry.png"
+        },
+        {
+            "name": "blacksmith-smelter",
+            "path": "assets/tilesets/blacksmith-smelter.png"
+        },
+        {
+            "name": "tavern-deco",
+            "path": "assets/tilesets/tavern-deco.png"
+        },
+        {
+            "name": "tavern-furniture",
+            "path": "assets/tilesets/tavern-furniture.png"
+        },
+        {
+            "name": "container",
+            "path": "assets/tilesets/container.png"
+        },
+        {
+            "name": "victorian-market",
+            "path": "assets/tilesets/victorian-market.png"
+        },
+        {
+            "name": "victorian-garden",
+            "path": "assets/tilesets/victorian-garden.png"
+        },
+        {
+            "name": "victorian-streets",
+            "path": "assets/tilesets/victorian-streets.png"
+        },
+        {
+            "name": "terrain-v7",
+            "path": "assets/tilesets/terrain-v7.png"
+        },
+        {
+            "name": "barn",
+            "path": "assets/tilesets/barn.png"
+        },
+        {
+            "name": "tavern-cooking",
+            "path": "assets/tilesets/tavern-cooking.png"
+        }
+    ],
+    "map": "assets/tilemaps/medievalBakingTilemap.tmj"
+}

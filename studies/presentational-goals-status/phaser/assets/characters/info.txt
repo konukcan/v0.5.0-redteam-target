@@ -1,0 +1,29 @@
+Information about the character sprite sheet
+
+Import as 64 by 64 pixels
+
+The width is 13 frames and the height is 107 frames
+
+Idle frames:
+up: 0, 1
+left: 13, 14
+right: 39, 40
+down: 26, 27
+
+# Walk frames
+up: 105 - 112
+left: 118 - 125
+down: 131 - 138
+right: 144 - 151
+
+# Interact frames
+up: 156, 157, 158, 157
+left: 169, 170, 171, 170
+down: 182, 183, 184, 183
+right: 195, 196, 197, 196
+
+# Bake frames
+up: 26-27-29-30-31-32
+
+# Cheeky frames
+cheekyright down: 182-186-187
