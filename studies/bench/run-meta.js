@@ -69,3 +69,21 @@ export function getGuardConfigFromUrl(search = defaultSearch()) {
   const params = new URLSearchParams(search);
   return params.get('guards') || 'full';
 }
+
+/**
+ * Read the `bot-mode` URL param. Returns `true` ONLY when the value is exactly
+ * `'1'`. Any other value (including `'true'`, `'0'`, absent) returns `false`.
+ *
+ * Why this exists: Browser Use bots cannot complete trials that require canvas
+ * drawing, sketchpad strokes, or drag-and-drop (free-sort). When this flag is
+ * set, the harness filters those trial types out of the timeline so bot sweeps
+ * actually reach completion. Humans/cyborgs omit the param; their timeline is
+ * unchanged.
+ *
+ * @param {string} [search]
+ * @returns {boolean}
+ */
+export function getBotModeFromUrl(search = defaultSearch()) {
+  const params = new URLSearchParams(search);
+  return params.get('bot-mode') === '1';
+}

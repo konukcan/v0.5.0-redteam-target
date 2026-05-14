@@ -38,11 +38,22 @@ import {
   getOrMakeRunId,
   getScenarioFromUrl,
   getGuardConfigFromUrl,
+  getBotModeFromUrl,
 } from './run-meta.js';
 
 const runId = getOrMakeRunId();
 const scenario = getScenarioFromUrl();
 const guards = getGuardConfigFromUrl(); // 'none' | 'friction' | 'full'
+const botMode = getBotModeFromUrl();
+
+// Browser Use can't complete these trial types (no clickable affordances —
+// canvas drawing, sketchpad strokes, drag-and-drop). When ?bot-mode=1 is set,
+// strip them out so bot sweeps actually reach the end of the timeline.
+const BOT_INCOMPATIBLE_TRIALS = new Set([
+  'canvas-keyboard-response',
+  'sketchpad',
+  'free-sort',
+]);
 // Opt-out for the voice trial. Surfaces a real jsPsych html-audio-response bug
 // at the pinned PR-3661 SHA; keeping it skippable lets schema-discovery runs
 // proceed without it. URL: ?skip-voice=1
@@ -110,8 +121,16 @@ if (guards === 'friction' || guards === 'full') {
   // gesture (button click) so fullscreen can be requested.
   timeline.push(jsPsychGuardFriction.entryTrial());
 }
+const replayTrials = buildReplayTestTrials();
+const filteredReplayTrials = botMode
+  ? replayTrials.filter((t) => !BOT_INCOMPATIBLE_TRIALS.has(t?.type?.info?.name))
+  : replayTrials;
+if (botMode) {
+  const removedCount = replayTrials.length - filteredReplayTrials.length;
+  console.log('[bench] bot-mode active — filtered out', removedCount, 'trial(s)');
+}
 timeline.push(
-  ...buildReplayTestTrials(),
+  ...filteredReplayTrials,
   buildRuleNamingTrial({ cardImage: 'assets/card-1.png' }),
 );
 if (!skipVoice) {
