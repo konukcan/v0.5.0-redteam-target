@@ -142,12 +142,26 @@
         // available regardless of test mode for mid-experiment console
         // inspection.
         var testMode = new URLSearchParams(window.location.search).get('test') === '1';
+        // Observe-only mode: append ?observe=1 to the URL to suppress
+        // friction's enforcement (no overlay, no content scramble, no
+        // fullscreen requirement) while still recording violations to the
+        // log. Designed for red-team environments where the agent can't
+        // enter fullscreen (e.g. GPT Operator). The honeypot bait
+        // surfaces are unaffected — they still get filled by agents that
+        // engage with them, and ai_use / ai_report still get recorded.
+        var observeMode = new URLSearchParams(window.location.search).get('observe') === '1';
         var skipComprehension = testMode; // Set to false to enable comprehension checks
         const prolific_return_url = "https://app.prolific.com/submissions/complete?cc=CYBS69HT";
         if (testMode) {
             console.log('%c[TEST MODE] Comprehension skipped; trials truncated to 2. ' +
                 'Call window._inspectGuards() in the console at any time to dump state.',
                 'background: #ffcc00; color: #000; padding: 2px 6px; font-weight: bold;');
+        }
+        if (observeMode) {
+            console.log('%c[OBSERVE MODE] Friction enforcement suppressed (no overlay, no scramble, no fullscreen requirement). ' +
+                'Violations still logged. Honeypot bait surfaces unchanged. ' +
+                'Use this URL to red-team agents that can\'t enter fullscreen.',
+                'background: #1976d2; color: #fff; padding: 2px 6px; font-weight: bold;');
         }
 
         // Participant + session IDs computed BEFORE initJsPsych so the
@@ -158,7 +172,22 @@
         const prolific_id = new URLSearchParams(window.location.search).get('PROLIFIC_PID') || '';
         const prolific_study_id = new URLSearchParams(window.location.search).get('STUDY_ID') || '';
         const prolific_session_id = new URLSearchParams(window.location.search).get('SESSION_ID') || '';
+        // DataPipe experiment ID. Get one at https://pipe.jspsych.org by
+        // creating a study tied to your OSF project. If you leave the
+        // placeholder, the study falls back to triggering a local CSV
+        // download in the browser (works for solo manual tests; will not
+        // work for Operator/cloud bots that have no download destination).
         const experiment_id = "GRbZzp3Wb17w";
+        const _USING_PLACEHOLDER_DATAPIPE_ID = experiment_id === "REPLACE_WITH_YOUR_DATAPIPE_ID";
+        if (_USING_PLACEHOLDER_DATAPIPE_ID) {
+            console.warn(
+                '%c[study] DataPipe experiment_id is a placeholder.\n' +
+                'Data will NOT upload to DataPipe; will fall back to a local CSV download.\n' +
+                'To use DataPipe: create a study at https://pipe.jspsych.org and replace ' +
+                'REPLACE_WITH_YOUR_DATAPIPE_ID in studies/presentational-goals-status/index.html.',
+                'color: #b07000; font-weight: bold;'
+            );
+        }
         const fileID = prolific_id || unique_id;
         const participant_id = prolific_id || unique_id;
 
@@ -170,7 +199,10 @@
             auto_update_progress_bar: false,
             extensions: [
                 { type: jsPsychCyborgHunter, params: { participantId: participant_id, preset: 'standard' } },
-                { type: jsPsychGuardFriction },
+                // In observe mode, friction starts itself from initialize()
+                // (no entry trial needed). In normal mode, friction starts
+                // from the entry trial's on_finish after fullscreen succeeds.
+                { type: jsPsychGuardFriction, params: { observeOnly: observeMode } },
                 { type: jsPsychGuardHoneypot }
             ],
             on_finish: () => {
@@ -1156,6 +1188,19 @@
                     console.error('[save_trial_data] DataPipe rejected the trials file. Filename:',
                         fileID + '_trials.csv', 'Response:', data.result);
                 }
+                // Fallback: if running with placeholder experiment_id, save the
+                // exact CSV body the data_string callback just built (stashed
+                // on window._lastTrialsCsv) to a local file. Produces an
+                // identical file to what DataPipe would have stored.
+                if (_USING_PLACEHOLDER_DATAPIPE_ID && window._lastTrialsCsv) {
+                    var _b = new Blob([window._lastTrialsCsv], { type: 'text/csv' });
+                    var _a = document.createElement('a');
+                    _a.href = URL.createObjectURL(_b);
+                    _a.download = fileID + '_trials.csv';
+                    document.body.appendChild(_a);
+                    _a.click();
+                    document.body.removeChild(_a);
+                }
             },
             data_string: function() {
                 // Drain guards BEFORE building the CSV so in-progress
@@ -1218,6 +1263,8 @@
                 var csv = [header].concat(rows).join('\n');
                 console.log('[save_trial_data] CSV length:', csv.length, 'bytes');
                 console.log('[save_trial_data] CSV body:\n' + csv);
+                // Stash for the placeholder-mode local download fallback (see on_finish above).
+                window._lastTrialsCsv = csv;
                 return csv;
             }
         };
@@ -1232,6 +1279,18 @@
                 if (!data.success) {
                     console.error('[save_participant_data] DataPipe rejected the participant file. Filename:',
                         fileID + '_participant.csv', 'Response:', data.result);
+                }
+                // Fallback: if running with placeholder experiment_id, save the
+                // exact participant CSV body to a local file. See save_trial_data
+                // for the symmetric pattern.
+                if (_USING_PLACEHOLDER_DATAPIPE_ID && window._lastParticipantCsv) {
+                    var _b = new Blob([window._lastParticipantCsv], { type: 'text/csv' });
+                    var _a = document.createElement('a');
+                    _a.href = URL.createObjectURL(_b);
+                    _a.download = fileID + '_participant.csv';
+                    document.body.appendChild(_a);
+                    _a.click();
+                    document.body.removeChild(_a);
                 }
             },
             data_string: function() {
@@ -1266,7 +1325,10 @@
                     '"' + (hp.ai_report || '').replace(/"/g, '""') + '"',
                 ].join(',');
                 var header = 'id,prolific_id,study_id,session_id,trial_type,feedback,age,gender,race,ethnicity,time,ai_use,ai_report';
-                return header + '\n' + participant;
+                var csv = header + '\n' + participant;
+                // Stash for the placeholder-mode local download fallback (see on_finish above).
+                window._lastParticipantCsv = csv;
+                return csv;
             }
         };
 
@@ -1291,7 +1353,10 @@
         var timeline = [];
         timeline.push(preload_trial);
         timeline.push(consent);
-        if (!debugMode) {
+        // Skip the entry trial in observe mode — it would request fullscreen
+        // and block agents that can't enter it. Friction monitoring still
+        // happens (started from the extension's initialize()), just silently.
+        if (!debugMode && !observeMode) {
             timeline.push(jsPsychGuardFriction.entryTrial());
         }
         if (!skipComprehension) {
