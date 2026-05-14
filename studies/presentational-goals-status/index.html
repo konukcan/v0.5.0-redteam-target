@@ -152,6 +152,19 @@
         var observeMode = new URLSearchParams(window.location.search).get('observe') === '1';
         var skipComprehension = testMode; // Set to false to enable comprehension checks
         const prolific_return_url = "https://app.prolific.com/submissions/complete?cc=CYBS69HT";
+
+        // RFC 4180-style CSV field quoter. Wraps any value in double quotes
+        // and escapes embedded quotes by doubling. Use for every string
+        // field that originates from URL params, jsPsych data, or
+        // participant input — any of which could contain a comma, newline,
+        // or quote that would otherwise corrupt the CSV. Numeric/boolean
+        // fields can stay raw. (Fix for the CSV-injection finding in PR #1
+        // review — URL-derived prolific_id et al. were inserted unquoted.)
+        function csvQuote(v) {
+            if (v == null) return '""';
+            var s = String(v);
+            return '"' + s.replace(/"/g, '""') + '"';
+        }
         if (testMode) {
             console.log('%c[TEST MODE] Comprehension skipped; trials truncated to 2. ' +
                 'Call window._inspectGuards() in the console at any time to dump state.',
@@ -1217,25 +1230,29 @@
                 console.log('[save_trial_data] matched trial records:', matched.length);
                 var data = matched;
                 var rows = data.map(function(t) {
+                    // All string fields go through csvQuote — protects against
+                    // commas/newlines in URL-derived IDs, vignette identifiers
+                    // (which contain '(', ';', ')' chars), and free-text
+                    // explanations. Numeric/boolean fields stay raw.
                     return [
-                        unique_id,
-                        prolific_id,
-                        t.trial_type,
+                        csvQuote(unique_id),
+                        csvQuote(prolific_id),
+                        csvQuote(t.trial_type),
                         t.trial_idx,
-                        t.story_id,
-                        t.first,
-                        t.top_position,
-                        t.vignette_sim,
-                        t.vignette_red_absent,
-                        t.vignette_red_present,
-                        t.vignette_green_absent,
-                        t.vignette_green_present,
+                        csvQuote(t.story_id),
+                        csvQuote(t.first),
+                        csvQuote(t.top_position),
+                        csvQuote(t.vignette_sim),
+                        csvQuote(t.vignette_red_absent),
+                        csvQuote(t.vignette_red_present),
+                        csvQuote(t.vignette_green_absent),
+                        csvQuote(t.vignette_green_present),
                         t.rt,
                         t.time_elapsed,
-                        t.red_likes,
-                        t.red_cares,
-                        t.green_likes,
-                        t.green_cares,
+                        csvQuote(t.red_likes),
+                        csvQuote(t.red_cares),
+                        csvQuote(t.green_likes),
+                        csvQuote(t.green_cares),
                         t.red_x,
                         t.red_y,
                         t.green_x,
@@ -1245,8 +1262,8 @@
                         t.guard_assistance_active ? 1 : 0,
                         t.guard_assistance_in_violation ? 1 : 0,
                         t.guard_assistance_violation_count || 0,
-                        '"' + (t.guard_assistance_current_reason || '').replace(/"/g, '""') + '"',
-                        '"' + (t.explanation || '').replace(/"/g, '""') + '"',
+                        csvQuote(t.guard_assistance_current_reason || ''),
+                        csvQuote(t.explanation || ''),
                     ].join(',');
                 });
                 var header = [
@@ -1309,20 +1326,24 @@
 
                 var hp = GuardHoneypot.getHoneypotData();
 
+                // All string fields go through csvQuote — same rationale as
+                // save_trial_data's rows.map. URL-derived prolific_*
+                // identifiers and free-text feedback in particular could
+                // contain commas or newlines that would corrupt the CSV.
                 var participant = [
-                    unique_id,
-                    prolific_id,
-                    prolific_study_id || '',
-                    prolific_session_id || '',
-                    'demographics',
-                    '"' + (resp.feedback || '') + '"',
+                    csvQuote(unique_id),
+                    csvQuote(prolific_id),
+                    csvQuote(prolific_study_id || ''),
+                    csvQuote(prolific_session_id || ''),
+                    csvQuote('demographics'),
+                    csvQuote(resp.feedback || ''),
                     resp.age || '',
-                    resp.gender || '',
-                    resp.race || '',
-                    '"' + (resp.ethnicity || '') + '"',
+                    csvQuote(resp.gender || ''),
+                    csvQuote(resp.race || ''),
+                    csvQuote(resp.ethnicity || ''),
                     time,
                     hp.ai_use,
-                    '"' + (hp.ai_report || '').replace(/"/g, '""') + '"',
+                    csvQuote(hp.ai_report || ''),
                 ].join(',');
                 var header = 'id,prolific_id,study_id,session_id,trial_type,feedback,age,gender,race,ethnicity,time,ai_use,ai_report';
                 var csv = header + '\n' + participant;
